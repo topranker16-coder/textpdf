@@ -2,74 +2,50 @@ import streamlit as st
 import re
 import os
 import urllib.request
-from fpdf import FPDF
+import io
 
-# 페이지 기본 설정
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.lib.colors import HexColor
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether
+)
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+
+# 페이지 설정
 st.set_page_config(
-    page_title="📄 대화&노트 텍스트 -> PDF 깔끔 변환기",
+    page_title="📄 대화&노트 ➔ 고품질 PDF 변환기",
     page_icon="📝",
-    layout="centered",
-    initial_sidebar_state="collapsed"
+    layout="centered"
 )
 
-# 커스텀 CSS 스타일링
-st.markdown('''
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<style>
-    .main .block-container {
-        max-width: 540px !important;
-        padding-top: 1rem !important;
-        padding-bottom: 2rem !important;
-        padding-left: 0.8rem !important;
-        padding-right: 0.8rem !important;
-    }
-    div.stButton > button {
-        width: 100% !important;
-        border-radius: 10px !important;
-        font-weight: bold !important;
-        padding: 12px 0px !important;
-    }
-</style>
-''', unsafe_allow_html=True)
-
-# 한글 폰트(나눔고딕) 자동 준비 함수
+# 한글 폰트(나눔고딕) 다운로드 및 등록
 FONT_PATH = "NanumGothic.ttf"
 def ensure_korean_font():
     if not os.path.exists(FONT_PATH):
-        # 구글 폰트/나눔고딕 공식 다운로드
         font_url = "https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-Regular.ttf"
         urllib.request.urlretrieve(font_url, FONT_PATH)
+    pdfmetrics.registerFont(TTFont("NanumGothic", FONT_PATH))
 
-# 한국어 PDF 생성 클래스
-class KoreanPDF(FPDF):
-    def __init__(self, title="소방시설관리사 공부노트"):
-        super().__init__()
-        self.doc_title = title
-        ensure_korean_font()
-        # 한글 폰트 등록
-        self.add_font("NanumGothic", "", FONT_PATH)
-        self.add_page()
-
-    def header(self):
-        self.set_font("NanumGothic", size=9)
-        self.set_text_color(100, 116, 139)
-        self.cell(0, 8, f"소방시설관리사 핵심 대화&공부노트 | {self.doc_title}", border=0, align="L")
-        self.ln(4)
-        self.set_draw_color(226, 232, 240)
-        self.line(10, 15, 200, 15)
-        self.ln(6)
-
-    def footer(self):
-        self.set_y(-15)
-        self.set_font("NanumGothic", size=9)
-        self.set_text_color(148, 163, 184)
-        self.cell(0, 10, f"- {self.page_no()} -", border=0, align="C")
+# 마크다운 서식을 ReportLab HTML 태그로 변환
+def md_to_rl_html(text):
+    if not text:
+        return ""
+    # XML 특수문자 이스케이프
+    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    # **볼드** -> <b>볼드</b>
+    text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
+    # *이탈릭* -> <i>이탈릭</i>
+    text = re.sub(r'\*(.*?)\*', r'<i>\1</i>', text)
+    # 줄바꿈 -> <br/>
+    text = text.replace('\n', '<br/>')
+    return text
 
 # 대화/텍스트 파싱 함수
 def parse_chat_text(raw_text):
-    text = re.sub(r'\*{2,}', '', raw_text)  # 마크다운 볼드 제거
-    lines = [l.strip() for l in text.split('\n') if l.strip()]
-    
+    lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
     sections = []
     current_q = ""
     current_a_lines = []
@@ -98,68 +74,128 @@ def parse_chat_text(raw_text):
         
     return sections
 
-# PDF 바이너리 생성 함수
-def build_pdf_bytes(title, sections):
-    pdf = KoreanPDF(title=title)
+# ReportLab 고품질 PDF 생성 함수
+def build_reportlab_pdf(title, sections):
+    ensure_korean_font()
     
-    pdf.set_font("NanumGothic", size=15)
-    pdf.set_text_color(15, 23, 42)
-    pdf.multi_cell(0, 10, title, align="C")
-    pdf.ln(4)
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=15 * mm,
+        rightMargin=15 * mm,
+        topMargin=20 * mm,
+        bottomMargin=20 * mm
+    )
     
-    pdf.set_draw_color(37, 99, 235)
-    pdf.set_line_width(0.8)
-    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-    pdf.ln(8)
+    usable_w = A4[0] - 30 * mm
     
+    # 스타일 정의
+    styles = getSampleStyleSheet()
+    
+    title_style = ParagraphStyle(
+        'DocTitle',
+        fontName='NanumGothic',
+        fontSize=18,
+        leading=22,
+        textColor=HexColor('#0f172a'),
+        alignment=1, # Center
+        spaceAfter=12
+    )
+    
+    q_style = ParagraphStyle(
+        'QStyle',
+        fontName='NanumGothic',
+        fontSize=11,
+        leading=16,
+        textColor=HexColor('#1e3a8a')
+    )
+    
+    a_style = ParagraphStyle(
+        'AStyle',
+        fontName='NanumGothic',
+        fontSize=10,
+        leading=16,
+        textColor=HexColor('#334155'),
+        spaceBefore=6,
+        spaceAfter=10
+    )
+    
+    story = []
+    
+    # 문서 제목
+    story.append(Paragraph(f"<b>{md_to_rl_html(title)}</b>", title_style))
+    story.append(Spacer(1, 10))
+    
+    # Q&A 세트 구성
     for idx, sec in enumerate(sections, 1):
-        q_text = sec["q"]
-        a_text = sec["a"]
+        q_html = md_to_rl_html(f"Q{idx}. {sec['q']}")
+        a_html = md_to_rl_html(sec['a'])
         
-        # 질문 상자
-        pdf.set_font("NanumGothic", size=11)
-        pdf.set_text_color(30, 58, 138)
-        pdf.set_fill_color(239, 246, 255)
-        pdf.multi_cell(0, 8, f"Q{idx}. {q_text}", fill=True, border=1)
-        pdf.ln(2)
+        # 질문 박스 (테이블 스타일)
+        q_para = Paragraph(f"<b>{q_html}</b>", q_style)
+        q_table = Table([[q_para]], colWidths=[usable_w])
+        q_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), HexColor('#eff6ff')),
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('LINELEFT', (0, 0), (0, 0), 4, HexColor('#2563eb')),
+        ]))
         
-        # 답변 내용
-        if a_text:
-            pdf.set_font("NanumGothic", size=10)
-            pdf.set_text_color(51, 65, 85)
-            pdf.multi_cell(0, 6, a_text)
-            
-        pdf.ln(6)
+        # 답변 파라그래프
+        a_para = Paragraph(a_html, a_style)
         
-    return bytes(pdf.output())
+        # 질문과 답변을 묶어 한 페이지에서 어색하게 쪼개지지 않도록 설정
+        item_group = KeepTogether([q_table, Spacer(1, 4), a_para, Spacer(1, 10)])
+        story.append(item_group)
+        
+    # 헤더 및 푸터 콜백
+    def add_header_footer(canvas, doc):
+        canvas.saveState()
+        canvas.setFont('NanumGothic', 8)
+        canvas.setFillColor(HexColor('#94a3b8'))
+        # 상단 헤더
+        canvas.drawString(15 * mm, A4[1] - 12 * mm, "🔥 소방시설관리사 핵심 공부노트")
+        canvas.setStrokeColor(HexColor('#e2e8f0'))
+        canvas.setLineWidth(0.5)
+        canvas.line(15 * mm, A4[1] - 14 * mm, A4[0] - 15 * mm, A4[1] - 14 * mm)
+        # 하단 푸터 (페이지 번호)
+        canvas.drawCentredString(A4[0] / 2, 10 * mm, f"- {doc.page} -")
+        canvas.restoreState()
+        
+    doc.build(story, onFirstPage=add_header_footer, onLaterPages=add_header_footer)
+    
+    buffer.seek(0)
+    return buffer.getvalue()
 
 # Streamlit UI
-st.title("📝 대화&노트 텍스트 ➔ PDF 깔끔 변환기")
-st.caption("마우스로 긁어서 붙여넣은 대화 내용이나 요약 노트를 소방시설관리사 공부용 PDF로 정돈해 드립니다!")
+st.title("📝 대화&노트 ➔ 고품질 PDF 변환기")
+st.caption("강조(**볼드**)와 줄바꿈이 완벽히 유지되는 고품질 공부노트 PDF를 생성합니다.")
 
-doc_title = st.text_input("📄 PDF 문서 제목:", "소방시설관리사 2차 실기 핵심 대화 노트")
+doc_title = st.text_input("📄 PDF 문서 제목:", "소방시설관리사 2차 실기 핵심 요약노트")
 
 raw_input = st.text_area(
     "📋 대화/노트 텍스트 복사-붙여넣기:",
     height=250,
-    placeholder="마우스로 긁은 채팅 대화나 질문/답변 텍스트를 여기에 붙여넣으세요..."
+    placeholder="마우스로 긁은 채팅 대화나 **강조가 들어간 텍스트**를 여기에 붙여넣으세요..."
 )
 
 if raw_input.strip():
     parsed_sections = parse_chat_text(raw_input)
     
     st.subheader(f"🔍 자동 정돈 미리보기 (총 {len(parsed_sections)}개 항목)")
-    
     for i, sec in enumerate(parsed_sections, 1):
         with st.expander(f"📌 [{i}] {sec['q'][:35]}...", expanded=True):
-            st.markdown(f"**질문/주제:** {sec['q']}")
-            st.markdown(f"**내용/답변:**\n{sec['a']}")
+            st.markdown(f"**질문:** {sec['q']}")
+            st.markdown(f"**답변:**\n{sec['a']}")
             
     try:
-        pdf_data = build_pdf_bytes(doc_title, parsed_sections)
+        pdf_bytes = build_reportlab_pdf(doc_title, parsed_sections)
         st.download_button(
-            label="📥 깔끔하게 정리된 PDF 파일 다운로드",
-            data=pdf_data,
+            label="📥 고품질 PDF 공부노트 다운로드",
+            data=pdf_bytes,
             file_name=f"{doc_title.replace(' ', '_')}.pdf",
             mime="application/pdf",
             type="primary"
