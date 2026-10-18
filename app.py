@@ -1,5 +1,7 @@
 import streamlit as st
 import re
+import os
+import urllib.request
 from fpdf import FPDF
 
 # 페이지 기본 설정
@@ -30,19 +32,28 @@ st.markdown('''
 </style>
 ''', unsafe_allow_html=True)
 
+# 한글 폰트(나눔고딕) 자동 준비 함수
+FONT_PATH = "NanumGothic.ttf"
+def ensure_korean_font():
+    if not os.path.exists(FONT_PATH):
+        # 구글 폰트/나눔고딕 공식 다운로드
+        font_url = "https://github.com/google/fonts/raw/main/ofl/nanumgothic/NanumGothic-Regular.ttf"
+        urllib.request.urlretrieve(font_url, FONT_PATH)
+
 # 한국어 PDF 생성 클래스
 class KoreanPDF(FPDF):
     def __init__(self, title="소방시설관리사 공부노트"):
         super().__init__()
         self.doc_title = title
+        ensure_korean_font()
+        # 한글 폰트 등록
+        self.add_font("NanumGothic", "", FONT_PATH)
         self.add_page()
-        # 한글 폰트 등록 (NotoSansKR / 나눔고딕)
-        self.add_font("NotoSansKR", "", "/usr/share/fonts/truetype/noto-cjk/NotoSansKR-Regular.ttf")
 
     def header(self):
-        self.set_font("NotoSansKR", size=9)
+        self.set_font("NanumGothic", size=9)
         self.set_text_color(100, 116, 139)
-        self.cell(0, 8, f"🔥 소방시설관리사 핵심 대화&공부노트 | {self.doc_title}", border=0, align="L")
+        self.cell(0, 8, f"소방시설관리사 핵심 대화&공부노트 | {self.doc_title}", border=0, align="L")
         self.ln(4)
         self.set_draw_color(226, 232, 240)
         self.line(10, 15, 200, 15)
@@ -50,7 +61,7 @@ class KoreanPDF(FPDF):
 
     def footer(self):
         self.set_y(-15)
-        self.set_font("NotoSansKR", size=9)
+        self.set_font("NanumGothic", size=9)
         self.set_text_color(148, 163, 184)
         self.cell(0, 10, f"- {self.page_no()} -", border=0, align="C")
 
@@ -91,7 +102,7 @@ def parse_chat_text(raw_text):
 def build_pdf_bytes(title, sections):
     pdf = KoreanPDF(title=title)
     
-    pdf.set_font("NotoSansKR", size=15)
+    pdf.set_font("NanumGothic", size=15)
     pdf.set_text_color(15, 23, 42)
     pdf.multi_cell(0, 10, title, align="C")
     pdf.ln(4)
@@ -106,7 +117,7 @@ def build_pdf_bytes(title, sections):
         a_text = sec["a"]
         
         # 질문 상자
-        pdf.set_font("NotoSansKR", size=11)
+        pdf.set_font("NanumGothic", size=11)
         pdf.set_text_color(30, 58, 138)
         pdf.set_fill_color(239, 246, 255)
         pdf.multi_cell(0, 8, f"Q{idx}. {q_text}", fill=True, border=1)
@@ -114,7 +125,7 @@ def build_pdf_bytes(title, sections):
         
         # 답변 내용
         if a_text:
-            pdf.set_font("NotoSansKR", size=10)
+            pdf.set_font("NanumGothic", size=10)
             pdf.set_text_color(51, 65, 85)
             pdf.multi_cell(0, 6, a_text)
             
